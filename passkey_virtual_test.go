@@ -86,6 +86,35 @@ func TestVirtualAuthenticatorAssertionVerifies(t *testing.T) {
 	}
 }
 
+func TestVirtualAuthenticatorUsesAllowCredentials(t *testing.T) {
+	va, err := NewVirtualAuthenticator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCredID := []byte("server-assigned-credential-id-32")
+	options, _ := json.Marshal(map[string]any{
+		"challenge": base64.RawURLEncoding.EncodeToString([]byte("c")),
+		"rpId":      "whatsapp.com",
+		"allowCredentials": []map[string]any{
+			{"type": "public-key", "id": base64.RawURLEncoding.EncodeToString(serverCredID)},
+		},
+	})
+	assertion, err := va.GetAssertion(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(assertion.CredentialID, serverCredID) {
+		t.Errorf("assertion should use the allowCredentials ID, got %q", assertion.CredentialID)
+	}
+	var parsed struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(assertion.AssertionJSON, &parsed)
+	if parsed.ID != base64.RawURLEncoding.EncodeToString(serverCredID) {
+		t.Error("assertion JSON id does not match allowCredentials ID")
+	}
+}
+
 func TestVirtualAuthenticatorMakeCredential(t *testing.T) {
 	va, err := NewVirtualAuthenticator()
 	if err != nil {

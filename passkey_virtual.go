@@ -7,6 +7,7 @@
 package whatsmeow
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -77,33 +78,61 @@ func (va *VirtualAuthenticator) GetAssertion(ctx context.Context, requestOptions
 		}
 		return va.SignAssertion(challenge)
 	}
-	challenge, rpID, err := parseWebAuthnRequestOptions(requestOptions)
+	challenge, rpID, allowCredentials, err := parseWebAuthnRequestOptions(requestOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse request options: %w", err)
 	}
 	if rpID != "" {
 		va.RPID = rpID
 	}
-	return va.SignAssertion(challenge)
+	credentialID := va.CredentialID
+	if len(allowCredentials) > 0 {
+		credentialID = pickCredential(allowCredentials, va.CredentialID)
+	}
+	return va.signAssertion(challenge, credentialID)
 }
 
-func parseWebAuthnRequestOptions(blob []byte) (challenge []byte, rpID string, err error) {
+func parseWebAuthnRequestOptions(blob []byte) (challenge []byte, rpID string, allowCredentials [][]byte, err error) {
 	var opts struct {
-		Challenge string `json:"challenge"`
-		RPID      string `json:"rpId"`
+		Challenge        string `json:"challenge"`
+		RPID             string `json:"rpId"`
+		AllowCredentials []struct {
+			ID string `json:"id"`
+		} `json:"allowCredentials"`
 	}
 	if err = json.Unmarshal(blob, &opts); err != nil {
-		return nil, "", fmt.Errorf("request options is not JSON: %w", err)
+		return nil, "", nil, fmt.Errorf("request options is not JSON: %w", err)
 	}
 	challenge, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(opts.Challenge, "="))
 	if err != nil {
-		return nil, "", fmt.Errorf("invalid base64url challenge: %w", err)
+		return nil, "", nil, fmt.Errorf("invalid base64url challenge: %w", err)
 	}
-	return challenge, opts.RPID, nil
+	for _, cred := range opts.AllowCredentials {
+		id, decErr := base64.RawURLEncoding.DecodeString(strings.TrimRight(cred.ID, "="))
+		if decErr == nil && len(id) > 0 {
+			allowCredentials = append(allowCredentials, id)
+		}
+	}
+	return challenge, opts.RPID, allowCredentials, nil
+}
+
+// pickCredential returns the credential the server expects: the authenticator's own ID if the server
+// allows it, otherwise the first allowed credential (a single-credential authenticator is that one).
+func pickCredential(allowed [][]byte, own []byte) []byte {
+	for _, id := range allowed {
+		if bytes.Equal(id, own) {
+			return own
+		}
+	}
+	return allowed[0]
 }
 
 // SignAssertion runs the WebAuthn assertion ceremony over the given challenge.
 func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*PasskeyAssertion, error) {
+	return va.signAssertion(challenge, va.CredentialID)
+}
+
+func (va *VirtualAuthenticator) signAssertion(challenge, credentialID []byte) (*PasskeyAssertion, error) {
 	rpID := va.RPID
 	if rpID == "" {
 		rpID = defaultPasskeyRPID
@@ -143,8 +172,8 @@ func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*PasskeyAsserti
 		userHandle = b64(va.UserHandle)
 	}
 	assertionJSON, err := json.Marshal(map[string]any{
-		"id":    b64(va.CredentialID),
-		"rawId": b64(va.CredentialID),
+		"id":    b64(credentialID),
+		"rawId": b64(credentialID),
 		"type":  "public-key",
 		"response": map[string]any{
 			"clientDataJSON":    b64(clientData),
@@ -156,7 +185,7 @@ func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*PasskeyAsserti
 	if err != nil {
 		return nil, err
 	}
-	return &PasskeyAssertion{CredentialID: va.CredentialID, AssertionJSON: assertionJSON}, nil
+	return &PasskeyAssertion{CredentialID: credentialID, AssertionJSON: assertionJSON}, nil
 }
 
 // PublicKey returns the credential's P-256 public key, for registering it on the account.
