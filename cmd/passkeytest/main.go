@@ -59,11 +59,12 @@ func main() {
 		}
 	})
 
-	fmt.Println("\n=== INSTALE NO TAMPERMONKEY (a CSP do WhatsApp bloqueia colar no console) ===")
-	fmt.Println(">>> Tampermonkey > Create new script > cole o conteúdo abaixo > Salvar.")
-	fmt.Print(">>> Abra/recarregue uma aba LOGADA do web.whatsapp.com e aceite o prompt @connect.\n\n")
-	fmt.Println(whatsmeow.BrowserBridgeScript("http://" + bridgeAddr))
-	fmt.Println("================================ FIM DO SCRIPT ===============================")
+	wd, _ := os.Getwd()
+	fmt.Println("\n=== INSTALE A EXTENSÃO (a CSP do WhatsApp bloqueia colar no console) ===")
+	fmt.Println(">>> chrome://extensions > Modo desenvolvedor > Carregar sem compactação (Load unpacked)")
+	fmt.Printf(">>> selecione a pasta: %s/cmd/passkeytest/extension\n", wd)
+	fmt.Println(">>> depois abra/recarregue uma aba LOGADA do web.whatsapp.com.")
+	fmt.Println("=====================================================================")
 
 	if cli.Store.ID == nil {
 		qrChan, _ := cli.GetQRChannel(ctx)

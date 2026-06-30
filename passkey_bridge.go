@@ -202,6 +202,8 @@ func BrowserBridgeScript(baseURL string) string {
 const browserBridgeScriptTemplate = `// ==UserScript==
 // @name         WhatsApp passkey bridge (whatsmeow)
 // @namespace    whatsmeow
+// @version      1.0
+// @description  Bridges web.whatsapp.com passkey assertions to a local whatsmeow client.
 // @match        https://web.whatsapp.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      __CONNECT_HOST__
