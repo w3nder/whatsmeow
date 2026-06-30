@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-package whatsmeow
+package passkeyauth
 
 import (
 	"context"
@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.mau.fi/whatsmeow"
 )
 
 // BrowserPasskeyAuthenticator implements PasskeyAuthenticator by delegating the WebAuthn ceremony to
@@ -40,7 +42,7 @@ type pendingPasskeyJob struct {
 }
 
 type passkeyBridgeResult struct {
-	assertion *PasskeyAssertion
+	assertion *whatsmeow.PasskeyAssertion
 	err       error
 }
 
@@ -52,7 +54,7 @@ func NewBrowserPasskeyAuthenticator() *BrowserPasskeyAuthenticator {
 
 // GetAssertion implements PasskeyAuthenticator. It hands the request options to the browser and
 // blocks until the browser returns a signed assertion (or the context/timeout expires).
-func (b *BrowserPasskeyAuthenticator) GetAssertion(ctx context.Context, requestOptions []byte) (*PasskeyAssertion, error) {
+func (b *BrowserPasskeyAuthenticator) GetAssertion(ctx context.Context, requestOptions []byte) (*whatsmeow.PasskeyAssertion, error) {
 	job := &pendingPasskeyJob{
 		id:      fmt.Sprintf("job-%d", atomic.AddUint64(&b.counter, 1)),
 		options: requestOptions,
@@ -178,7 +180,7 @@ func (b *BrowserPasskeyAuthenticator) handleAssertion(w http.ResponseWriter, r *
 		http.Error(w, "invalid credential_id", http.StatusBadRequest)
 		return
 	}
-	job.result <- passkeyBridgeResult{assertion: &PasskeyAssertion{
+	job.result <- passkeyBridgeResult{assertion: &whatsmeow.PasskeyAssertion{
 		CredentialID:  credID,
 		AssertionJSON: []byte(body.Assertion),
 	}}

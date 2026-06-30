@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/passkeyauth"
 )
 
 // ExampleBrowserPasskeyAuthenticator shows how to link a device on an account that requires the
@@ -25,7 +26,7 @@ func ExampleBrowserPasskeyAuthenticator() {
 	// cli is a normal whatsmeow client; see the README for store/Container setup.
 	var cli *whatsmeow.Client
 
-	bridge := whatsmeow.NewBrowserPasskeyAuthenticator()
+	bridge := passkeyauth.NewBrowserPasskeyAuthenticator()
 	go func() {
 		// Serve on localhost; the browser script polls this address.
 		_ = bridge.ListenAndServe("127.0.0.1:7799")
@@ -33,7 +34,7 @@ func ExampleBrowserPasskeyAuthenticator() {
 	cli.PasskeyAuthenticator = bridge
 
 	fmt.Println("Paste this in the web.whatsapp.com console:")
-	fmt.Println(whatsmeow.BrowserBridgeScript("http://127.0.0.1:7799"))
+	fmt.Println(passkeyauth.BrowserBridgeScript("http://127.0.0.1:7799"))
 
 	qrChan, _ := cli.GetQRChannel(context.Background())
 	_ = cli.Connect()
@@ -55,14 +56,14 @@ func ExampleBrowserPasskeyAuthenticator() {
 func ExampleVirtualAuthenticator() {
 	var cli *whatsmeow.Client
 
-	va, err := whatsmeow.NewVirtualAuthenticator()
+	va, err := passkeyauth.NewVirtualAuthenticator()
 	if err != nil {
 		panic(err)
 	}
 
 	// Persist the authenticator (private key + credential ID) so the same passkey is reused later.
 	blob, _ := va.Export()
-	_ = blob // store this somewhere safe; restore with whatsmeow.ImportVirtualAuthenticator(blob)
+	_ = blob // store this somewhere safe; restore with passkeyauth.ImportVirtualAuthenticator(blob)
 
 	cli.PasskeyAuthenticator = va
 

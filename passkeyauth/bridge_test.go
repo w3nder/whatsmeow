@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-package whatsmeow
+package passkeyauth
 
 import (
 	"bytes"
@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.mau.fi/whatsmeow"
 )
 
 func TestBrowserPasskeyAuthenticatorBridge(t *testing.T) {
@@ -27,7 +29,7 @@ func TestBrowserPasskeyAuthenticatorBridge(t *testing.T) {
 	credID := []byte("the-credential-id")
 
 	type result struct {
-		assertion *PasskeyAssertion
+		assertion *whatsmeow.PasskeyAssertion
 		err       error
 	}
 	done := make(chan result, 1)

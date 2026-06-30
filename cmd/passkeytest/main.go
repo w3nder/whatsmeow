@@ -18,6 +18,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/passkeyauth"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -42,7 +43,7 @@ func main() {
 	cli := whatsmeow.NewClient(deviceStore, clientLog)
 
 	// Browser passkey bridge: an existing browser/OS passkey signs the prologue assertion.
-	bridge := whatsmeow.NewBrowserPasskeyAuthenticator()
+	bridge := passkeyauth.NewBrowserPasskeyAuthenticator()
 	go func() {
 		if serveErr := bridge.ListenAndServe(bridgeAddr); serveErr != nil {
 			clientLog.Errorf("Bridge server stopped: %v", serveErr)

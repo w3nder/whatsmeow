@@ -4,7 +4,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-package whatsmeow
+// Package passkeyauth provides ready-made implementations of whatsmeow.PasskeyAuthenticator for
+// accounts that require the Shortcake passkey prologue during companion linking.
+package passkeyauth
 
 import (
 	"bytes"
@@ -19,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.mau.fi/whatsmeow"
 )
 
 const (
@@ -70,7 +74,7 @@ func NewVirtualAuthenticator() (*VirtualAuthenticator, error) {
 
 // GetAssertion implements PasskeyAuthenticator. The passkey_request_options blob is a JSON
 // PublicKeyCredentialRequestOptions (challenge and allowCredentials IDs are base64url).
-func (va *VirtualAuthenticator) GetAssertion(ctx context.Context, requestOptions []byte) (*PasskeyAssertion, error) {
+func (va *VirtualAuthenticator) GetAssertion(ctx context.Context, requestOptions []byte) (*whatsmeow.PasskeyAssertion, error) {
 	if va.ParseRequestOptions != nil {
 		challenge, err := va.ParseRequestOptions(requestOptions)
 		if err != nil {
@@ -128,11 +132,11 @@ func pickCredential(allowed [][]byte, own []byte) []byte {
 }
 
 // SignAssertion runs the WebAuthn assertion ceremony over the given challenge.
-func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*PasskeyAssertion, error) {
+func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*whatsmeow.PasskeyAssertion, error) {
 	return va.signAssertion(challenge, va.CredentialID)
 }
 
-func (va *VirtualAuthenticator) signAssertion(challenge, credentialID []byte) (*PasskeyAssertion, error) {
+func (va *VirtualAuthenticator) signAssertion(challenge, credentialID []byte) (*whatsmeow.PasskeyAssertion, error) {
 	rpID := va.RPID
 	if rpID == "" {
 		rpID = defaultPasskeyRPID
@@ -185,7 +189,7 @@ func (va *VirtualAuthenticator) signAssertion(challenge, credentialID []byte) (*
 	if err != nil {
 		return nil, err
 	}
-	return &PasskeyAssertion{CredentialID: credentialID, AssertionJSON: assertionJSON}, nil
+	return &whatsmeow.PasskeyAssertion{CredentialID: credentialID, AssertionJSON: assertionJSON}, nil
 }
 
 // PublicKey returns the credential's P-256 public key, for registering it on the account.

@@ -8,6 +8,8 @@ require (
 	github.com/beeper/argo-go v1.1.2
 	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-sqlite3 v1.14.45
+	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/rs/zerolog v1.35.1
 	go.mau.fi/libsignal v0.2.2
 	go.mau.fi/util v0.9.10
@@ -26,5 +28,7 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )
