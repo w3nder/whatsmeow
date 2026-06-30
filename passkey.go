@@ -116,22 +116,27 @@ type shortcakeLinkingState struct {
 func (cli *Client) handlePasskeyPrologueRequest(ctx context.Context, node *waBinary.Node) {
 	// Verbose capture: dump the raw notification and the request options so the format can be
 	// confirmed against real accounts. Share these logs to help debug the passkey flow (#1185).
+	opts, _ := node.GetChildByTag("passkey_request_options").Content.([]byte)
 	cli.Log.Infof("[passkey-debug] passkey_prologue_request received:\n%s", node.String())
-	if opts, ok := node.GetChildByTag("passkey_request_options").Content.([]byte); ok {
+	if len(opts) > 0 {
 		cli.Log.Infof("[passkey-debug] passkey_request_options (%d bytes): %s", len(opts), string(opts))
 	}
 
+	notify := func() {
+		cli.Log.Warnf("This account requires a passkey to link. whatsmeow cannot create or sign one " +
+			"on its own. To link without a browser, remove the passkey on your phone " +
+			"(Settings > Account > Passkeys); otherwise complete linking in a browser at " + PasskeyHelpURL +
+			" (the assertion can only run on that origin). See tulir/whatsmeow#1185.")
+		cli.dispatchEvent(&events.ShortcakePasskeyRequired{HelpURL: PasskeyHelpURL, RequestOptions: opts})
+	}
+
 	if cli.PasskeyAuthenticator == nil {
-		cli.Log.Warnf("This account requires a passkey to link, but no PasskeyAuthenticator is set. " +
-			"whatsmeow cannot create a passkey (the WhatsApp protocol has no enrollment); the assertion " +
-			"can only run on the whatsapp.com origin. Open " + PasskeyHelpURL + " in a browser and link " +
-			"there, or run with the passkey bridge. See tulir/whatsmeow#1185.")
-		cli.dispatchEvent(&events.ShortcakePasskeyRequired{HelpURL: PasskeyHelpURL})
+		notify()
 		return
 	}
 	if err := cli.completePasskeyPrologue(ctx, node); err != nil {
 		cli.Log.Errorf("Failed to complete passkey prologue: %v", err)
-		cli.dispatchEvent(&events.ShortcakePasskeyRequired{HelpURL: PasskeyHelpURL})
+		notify()
 	}
 }
 

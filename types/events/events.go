@@ -47,10 +47,15 @@ type ShortcakeVerificationCode struct {
 }
 
 // ShortcakePasskeyRequired is emitted when the server requires a passkey to link this device but
-// whatsmeow could not satisfy it (no authenticator, or the assertion failed). The user must complete
-// linking in a browser at HelpURL, since the WebAuthn assertion can only run on that origin.
+// whatsmeow could not satisfy it (no authenticator, or the assertion failed).
+//
+// RequestOptions is the WebAuthn PublicKeyCredentialRequestOptions (JSON) from the server — a capable
+// frontend can run navigator.credentials.get() with it and provide the assertion. Otherwise the user
+// must complete linking in a browser at HelpURL (the assertion can only run on the whatsapp.com
+// origin), or remove the passkey on their phone to link without a browser.
 type ShortcakePasskeyRequired struct {
-	HelpURL string
+	HelpURL        string
+	RequestOptions []byte
 }
 
 // PairSuccess is emitted after the QR code has been scanned with the phone and the handshake has

@@ -61,8 +61,9 @@ func main() {
 		case *events.ShortcakeVerificationCode:
 			fmt.Printf("\n>>> Confirme no celular que o código bate: %s\n\n", e.Code)
 		case *events.ShortcakePasskeyRequired:
-			fmt.Printf("\n>>> Esta conta EXIGE passkey. Abra no seu browser: %s\n", e.HelpURL)
-			fmt.Println(">>> e rode com -mode bridge (extensão instalada) para concluir o vínculo.")
+			fmt.Println("\n>>> Esta conta EXIGE passkey. Opções:")
+			fmt.Println(">>>  1) Sem browser: remova a passkey no celular (Configurações > Conta > Chaves de acesso).")
+			fmt.Printf(">>>  2) Com browser: abra %s e rode com -mode bridge (extensão instalada).\n", e.HelpURL)
 		case *events.PairSuccess:
 			fmt.Printf("\n>>> Pareado com sucesso: %s\n\n", e.ID)
 		}
