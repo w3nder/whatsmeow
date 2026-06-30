@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -26,6 +27,10 @@ const (
 	webauthnFlagUserPresent  = 0x01
 	webauthnFlagUserVerified = 0x04
 	webauthnFlagAttestedData = 0x40
+
+	// PRF extension parameters captured from WAWebIntegrityChallengeUtils.performPasskeyAssertion.
+	webauthnPRFSalt    = "whatsapp-challenge"
+	webauthnPRFContext = "WebAuthn PRF"
 )
 
 // VirtualAuthenticator is a self-contained software WebAuthn authenticator that implements
@@ -36,6 +41,7 @@ const (
 // key); reuse the same VirtualAuthenticator for registration and linking, or import an exported one.
 type VirtualAuthenticator struct {
 	privateKey   *ecdsa.PrivateKey
+	prfSecret    []byte
 	CredentialID []byte
 	UserHandle   []byte
 	RPID         string
@@ -58,12 +64,28 @@ func NewVirtualAuthenticator() (*VirtualAuthenticator, error) {
 	if _, err = rand.Read(credID); err != nil {
 		return nil, err
 	}
+	prfSecret := make([]byte, 32)
+	if _, err = rand.Read(prfSecret); err != nil {
+		return nil, err
+	}
 	return &VirtualAuthenticator{
 		privateKey:   priv,
+		prfSecret:    prfSecret,
 		CredentialID: credID,
 		RPID:         defaultPasskeyRPID,
 		Origin:       defaultPasskeyOrigin,
 	}, nil
+}
+
+// prfOutput reproduces the WebAuthn PRF (hmac-secret) result for the captured "whatsapp-challenge"
+// salt: HMAC-SHA256(prfSecret, SHA256("WebAuthn PRF" || 0x00 || salt)).
+func (va *VirtualAuthenticator) prfOutput() []byte {
+	saltInput := append([]byte(webauthnPRFContext), 0x00)
+	saltInput = append(saltInput, []byte(webauthnPRFSalt)...)
+	hashed := sha256.Sum256(saltInput)
+	mac := hmac.New(sha256.New, va.prfSecret)
+	mac.Write(hashed[:])
+	return mac.Sum(nil)
 }
 
 // GetAssertion implements PasskeyAuthenticator.
@@ -115,19 +137,19 @@ func (va *VirtualAuthenticator) SignAssertion(challenge []byte) (*PasskeyAsserti
 	}
 
 	b64 := base64.RawURLEncoding.EncodeToString
-	response := map[string]any{
-		"clientDataJSON":    b64(clientData),
-		"authenticatorData": b64(authData),
-		"signature":         b64(signature),
-	}
+	userHandle := ""
 	if len(va.UserHandle) > 0 {
-		response["userHandle"] = b64(va.UserHandle)
+		userHandle = b64(va.UserHandle)
 	}
 	assertionJSON, err := json.Marshal(map[string]any{
-		"id":       b64(va.CredentialID),
-		"rawId":    b64(va.CredentialID),
-		"type":     "public-key",
-		"response": response,
+		"credential_id":      b64(va.CredentialID),
+		"raw_id":             b64(va.CredentialID),
+		"type":               "public-key",
+		"authenticator_data": b64(authData),
+		"client_data_json":   b64(clientData),
+		"signature":          b64(signature),
+		"user_handle":        userHandle,
+		"prf_output":         b64(va.prfOutput()),
 	})
 	if err != nil {
 		return nil, err
@@ -250,6 +272,7 @@ func cborMapHead(n int) []byte { return cborHead(5, uint64(n)) }
 
 type exportedVirtualAuthenticator struct {
 	PrivateKey   []byte `json:"private_key"`
+	PRFSecret    []byte `json:"prf_secret"`
 	CredentialID []byte `json:"credential_id"`
 	UserHandle   []byte `json:"user_handle,omitempty"`
 	RPID         string `json:"rp_id"`
@@ -265,6 +288,7 @@ func (va *VirtualAuthenticator) Export() ([]byte, error) {
 	}
 	return json.Marshal(exportedVirtualAuthenticator{
 		PrivateKey:   pkcs8,
+		PRFSecret:    va.prfSecret,
 		CredentialID: va.CredentialID,
 		UserHandle:   va.UserHandle,
 		RPID:         va.RPID,
@@ -289,6 +313,7 @@ func ImportVirtualAuthenticator(data []byte) (*VirtualAuthenticator, error) {
 	}
 	return &VirtualAuthenticator{
 		privateKey:   ecKey,
+		prfSecret:    exp.PRFSecret,
 		CredentialID: exp.CredentialID,
 		UserHandle:   exp.UserHandle,
 		RPID:         exp.RPID,

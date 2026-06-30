@@ -19,19 +19,21 @@ import (
 func decodeAssertion(t *testing.T, assertionJSON []byte) (authData, clientData, sig []byte) {
 	t.Helper()
 	var parsed struct {
-		Response struct {
-			ClientDataJSON    string `json:"clientDataJSON"`
-			AuthenticatorData string `json:"authenticatorData"`
-			Signature         string `json:"signature"`
-		} `json:"response"`
+		AuthenticatorData string `json:"authenticator_data"`
+		ClientDataJSON    string `json:"client_data_json"`
+		Signature         string `json:"signature"`
+		PRFOutput         string `json:"prf_output"`
 	}
 	if err := json.Unmarshal(assertionJSON, &parsed); err != nil {
 		t.Fatalf("assertion is not valid JSON: %v", err)
 	}
+	if parsed.PRFOutput == "" {
+		t.Error("assertion missing prf_output")
+	}
 	dec := base64.RawURLEncoding.DecodeString
-	authData, _ = dec(parsed.Response.AuthenticatorData)
-	clientData, _ = dec(parsed.Response.ClientDataJSON)
-	sig, _ = dec(parsed.Response.Signature)
+	authData, _ = dec(parsed.AuthenticatorData)
+	clientData, _ = dec(parsed.ClientDataJSON)
+	sig, _ = dec(parsed.Signature)
 	return authData, clientData, sig
 }
 
