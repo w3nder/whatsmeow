@@ -185,46 +185,96 @@ func (b *BrowserPasskeyAuthenticator) handleAssertion(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
-// BrowserBridgeScript returns the JavaScript to paste in the console of a logged-in web.whatsapp.com
-// tab (or wrap in a userscript). baseURL is where the bridge HTTP API is reachable, e.g.
-// "http://127.0.0.1:7799".
+// BrowserBridgeScript returns a Tampermonkey userscript that bridges the bridge HTTP API to the
+// browser's passkey. A userscript (not a console paste) is required because web.whatsapp.com's
+// Content-Security-Policy blocks fetch/XHR to localhost; GM_xmlhttpRequest runs in a privileged
+// context that bypasses it. Install it in Tampermonkey (allow the @connect prompt). baseURL is where
+// the bridge HTTP API is reachable, e.g. "http://127.0.0.1:7799".
 func BrowserBridgeScript(baseURL string) string {
-	return strings.ReplaceAll(browserBridgeScriptTemplate, "__BASE_URL__", baseURL)
+	host := strings.TrimPrefix(strings.TrimPrefix(baseURL, "http://"), "https://")
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	s := strings.ReplaceAll(browserBridgeScriptTemplate, "__BASE_URL__", baseURL)
+	return strings.ReplaceAll(s, "__CONNECT_HOST__", host)
 }
 
-const browserBridgeScriptTemplate = `(() => {
-  const BASE = "__BASE_URL__";
-  const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const fromB64url = (s) => { s = s.replace(/-/g, "+").replace(/_/g, "/"); const pad = s.length % 4 ? "=".repeat(4 - s.length % 4) : ""; const bin = atob(s + pad); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
-  async function tick() {
-    try {
-      const r = await fetch(BASE + "/pending");
-      if (r.status === 200) {
-        const job = await r.json();
-        const opts = JSON.parse(job.options);
-        if (opts.challenge) opts.challenge = fromB64url(opts.challenge);
-        if (Array.isArray(opts.allowCredentials)) opts.allowCredentials.forEach((c) => { if (c.id) c.id = fromB64url(c.id); });
+const browserBridgeScriptTemplate = `// ==UserScript==
+// @name         WhatsApp passkey bridge (whatsmeow)
+// @namespace    whatsmeow
+// @match        https://web.whatsapp.com/*
+// @grant        GM_xmlhttpRequest
+// @connect      __CONNECT_HOST__
+// @run-at       document-idle
+// ==/UserScript==
+(function () {
+  "use strict";
+  var BASE = "__BASE_URL__";
+
+  // Page-world signer: runs navigator.credentials.get with page-native buffers, replies via postMessage.
+  function pageSigner() {
+    var b64url = function (buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+    var fromB64url = function (s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); var pad = s.length % 4 ? "=".repeat(4 - s.length % 4) : ""; var bin = atob(s + pad); var u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+    window.addEventListener("message", function (ev) {
+      var d = ev.data;
+      if (!d || d.__pkbridge !== "req") return;
+      (async function () {
         try {
-          const cred = await navigator.credentials.get({ publicKey: opts });
-          const assertion = {
-            id: cred.id,
-            rawId: b64url(cred.rawId),
-            type: cred.type,
+          var opts = JSON.parse(d.options);
+          if (opts.challenge) opts.challenge = fromB64url(opts.challenge);
+          if (Array.isArray(opts.allowCredentials)) opts.allowCredentials.forEach(function (c) { if (c.id) c.id = fromB64url(c.id); });
+          var cred = await navigator.credentials.get({ publicKey: opts });
+          var assertion = {
+            id: cred.id, rawId: b64url(cred.rawId), type: cred.type,
             response: {
               clientDataJSON: b64url(cred.response.clientDataJSON),
               authenticatorData: b64url(cred.response.authenticatorData),
               signature: b64url(cred.response.signature),
-              userHandle: cred.response.userHandle ? b64url(cred.response.userHandle) : null,
-            },
+              userHandle: cred.response.userHandle ? b64url(cred.response.userHandle) : null
+            }
           };
-          await fetch(BASE + "/assertion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: job.id, assertion_json: JSON.stringify(assertion), credential_id: b64url(cred.rawId) }) });
+          window.postMessage({ __pkbridge: "res", id: d.id, assertion_json: JSON.stringify(assertion), credential_id: b64url(cred.rawId) }, "*");
         } catch (e) {
-          await fetch(BASE + "/assertion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: job.id, error: String(e) }) });
+          window.postMessage({ __pkbridge: "res", id: d.id, error: String(e) }, "*");
         }
+      })();
+    });
+  }
+
+  var script = document.createElement("script");
+  script.textContent = "(" + pageSigner.toString() + ")();";
+  (document.documentElement || document.head).appendChild(script);
+  script.remove();
+
+  var pending = {};
+  window.addEventListener("message", function (ev) {
+    var d = ev.data;
+    if (!d || d.__pkbridge !== "res") return;
+    var cb = pending[d.id];
+    if (cb) { delete pending[d.id]; cb(d); }
+  });
+  function signInPage(id, options) {
+    return new Promise(function (resolve) { pending[id] = resolve; window.postMessage({ __pkbridge: "req", id: id, options: options }, "*"); });
+  }
+  function gm(method, url, body) {
+    return new Promise(function (resolve, reject) {
+      GM_xmlhttpRequest({ method: method, url: url, headers: { "Content-Type": "application/json" }, data: body, onload: resolve, onerror: reject });
+    });
+  }
+  async function tick() {
+    try {
+      var r = await gm("GET", BASE + "/pending");
+      if (r.status === 200 && r.responseText) {
+        var job = JSON.parse(r.responseText);
+        var res = await signInPage(job.id, job.options);
+        var body = res.error
+          ? { id: job.id, error: res.error }
+          : { id: job.id, assertion_json: res.assertion_json, credential_id: res.credential_id };
+        await gm("POST", BASE + "/assertion", JSON.stringify(body));
       }
     } catch (e) { /* bridge not reachable yet */ }
     setTimeout(tick, 1500);
   }
   tick();
-  console.log("[passkey-bridge] ativo, escutando " + BASE);
+  console.log("[passkey-bridge] ativo (Tampermonkey), escutando " + BASE);
 })();`
