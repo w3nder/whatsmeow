@@ -21,6 +21,8 @@ import (
 	"go.mau.fi/whatsmeow"
 )
 
+var _ whatsmeow.PasskeyAuthenticator = (*BrowserPasskeyAuthenticator)(nil)
+
 // BrowserPasskeyAuthenticator implements PasskeyAuthenticator by delegating the WebAuthn ceremony to
 // a real browser: the assertion is signed by the passkey already stored in the browser/OS, so no
 // private key is ever extracted. It exposes a small HTTP API that a script running on web.whatsapp.com

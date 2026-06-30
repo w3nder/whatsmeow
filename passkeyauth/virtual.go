@@ -34,6 +34,11 @@ const (
 	webauthnFlagAttestedData = 0x40
 )
 
+var (
+	_ whatsmeow.PasskeyAuthenticator = (*VirtualAuthenticator)(nil)
+	_ whatsmeow.PasskeyRegistrar     = (*VirtualAuthenticator)(nil)
+)
+
 // VirtualAuthenticator is a self-contained software WebAuthn authenticator that implements
 // PasskeyAuthenticator. It holds an ES256 (P-256) credential and produces assertions in Go,
 // so no browser or external authenticator is needed for the assertion ceremony.

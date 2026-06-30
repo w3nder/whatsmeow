@@ -48,6 +48,64 @@ type PasskeyAuthenticator interface {
 	GetAssertion(ctx context.Context, requestOptions []byte) (*PasskeyAssertion, error)
 }
 
+// PasskeyRegistrar produces a WebAuthn attestation (navigator.credentials.create) for registering a
+// new passkey on the account. passkeyauth.VirtualAuthenticator implements it via MakeCredential.
+type PasskeyRegistrar interface {
+	MakeCredential(challenge, userID []byte, userName string) (attestationResponseJSON []byte, err error)
+}
+
+// RegisterPasskey attempts to register a software passkey on the account so the Shortcake prologue can
+// be satisfied headlessly (no browser).
+//
+// SKELETON — NOT YET FUNCTIONAL. The WhatsApp passkey enrollment IQ format is not reverse-engineered
+// (those modules are lazy-loaded and were absent from the captured web bundle). The tags below are
+// placeholders. Run this on a passkey-rollout account with debug logging and share the logged stanzas
+// (the [passkey-register] lines) so the real request/response format can be filled in. See #1185.
+func (cli *Client) RegisterPasskey(ctx context.Context, registrar PasskeyRegistrar) error {
+	// TODO(passkey-enrollment): confirm the request tag/namespace for fetching creation options.
+	cli.Log.Infof("[passkey-register] requesting creation options (placeholder IQ — confirm format)")
+	resp, err := cli.sendIQ(ctx, infoQuery{
+		Namespace: "md",
+		Type:      iqGet,
+		To:        types.ServerJID,
+		Content:   []waBinary.Node{{Tag: "passkey_creation_options"}},
+	})
+	if err != nil {
+		cli.Log.Warnf("[passkey-register] creation options IQ failed (expected until format is known): %v", err)
+		return fmt.Errorf("passkey enrollment not implemented yet: %w", err)
+	}
+	cli.Log.Infof("[passkey-register] creation options response:\n%s", resp.String())
+
+	// TODO(passkey-enrollment): parse the real challenge / user.id / user.name from resp.
+	var challenge, userID []byte
+	var userName string
+	if optsNode := resp.GetChildByTag("passkey_creation_options"); optsNode.Tag != "" {
+		challenge, _ = optsNode.GetChildByTag("challenge").Content.([]byte)
+	}
+
+	attestation, err := registrar.MakeCredential(challenge, userID, userName)
+	if err != nil {
+		return fmt.Errorf("failed to build attestation: %w", err)
+	}
+	cli.Log.Infof("[passkey-register] attestation built (%d bytes); submitting (placeholder IQ — confirm format)", len(attestation))
+
+	// TODO(passkey-enrollment): confirm the submit tag/structure (likely a protobuf, not raw JSON).
+	subResp, err := cli.sendIQ(ctx, infoQuery{
+		Namespace: "md",
+		Type:      iqSet,
+		To:        types.ServerJID,
+		Content: []waBinary.Node{{Tag: "passkey", Content: []waBinary.Node{
+			{Tag: "attestation", Content: attestation},
+		}}},
+	})
+	if err != nil {
+		cli.Log.Warnf("[passkey-register] submit IQ failed (expected until format is known): %v", err)
+		return fmt.Errorf("passkey enrollment submit failed: %w", err)
+	}
+	cli.Log.Infof("[passkey-register] submit response:\n%s", subResp.String())
+	return nil
+}
+
 type shortcakeLinkingState struct {
 	keypair        *keys.KeyPair
 	companionNonce []byte
@@ -56,6 +114,13 @@ type shortcakeLinkingState struct {
 }
 
 func (cli *Client) handlePasskeyPrologueRequest(ctx context.Context, node *waBinary.Node) {
+	// Verbose capture: dump the raw notification and the request options so the format can be
+	// confirmed against real accounts. Share these logs to help debug the passkey flow (#1185).
+	cli.Log.Infof("[passkey-debug] passkey_prologue_request received:\n%s", node.String())
+	if opts, ok := node.GetChildByTag("passkey_request_options").Content.([]byte); ok {
+		cli.Log.Infof("[passkey-debug] passkey_request_options (%d bytes): %s", len(opts), string(opts))
+	}
+
 	if cli.PasskeyAuthenticator == nil {
 		cli.Log.Warnf("Received passkey_prologue_request but no PasskeyAuthenticator is set; linking will time out")
 		return
