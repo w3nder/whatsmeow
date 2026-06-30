@@ -19,21 +19,19 @@ import (
 func decodeAssertion(t *testing.T, assertionJSON []byte) (authData, clientData, sig []byte) {
 	t.Helper()
 	var parsed struct {
-		AuthenticatorData string `json:"authenticator_data"`
-		ClientDataJSON    string `json:"client_data_json"`
-		Signature         string `json:"signature"`
-		PRFOutput         string `json:"prf_output"`
+		Response struct {
+			ClientDataJSON    string `json:"clientDataJSON"`
+			AuthenticatorData string `json:"authenticatorData"`
+			Signature         string `json:"signature"`
+		} `json:"response"`
 	}
 	if err := json.Unmarshal(assertionJSON, &parsed); err != nil {
 		t.Fatalf("assertion is not valid JSON: %v", err)
 	}
-	if parsed.PRFOutput == "" {
-		t.Error("assertion missing prf_output")
-	}
 	dec := base64.RawURLEncoding.DecodeString
-	authData, _ = dec(parsed.AuthenticatorData)
-	clientData, _ = dec(parsed.ClientDataJSON)
-	sig, _ = dec(parsed.Signature)
+	authData, _ = dec(parsed.Response.AuthenticatorData)
+	clientData, _ = dec(parsed.Response.ClientDataJSON)
+	sig, _ = dec(parsed.Response.Signature)
 	return authData, clientData, sig
 }
 
@@ -44,12 +42,22 @@ func TestVirtualAuthenticatorAssertionVerifies(t *testing.T) {
 	}
 	challenge := []byte("a-server-challenge")
 
-	assertion, err := va.GetAssertion(context.Background(), challenge)
+	// The real passkey_request_options blob is a JSON PublicKeyCredentialRequestOptions.
+	options, _ := json.Marshal(map[string]any{
+		"challenge": base64.RawURLEncoding.EncodeToString(challenge),
+		"rpId":      "whatsapp.com",
+	})
+	assertion, err := va.GetAssertion(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	authData, clientData, sig := decodeAssertion(t, assertion.AssertionJSON)
+
+	// The challenge inside clientDataJSON must equal the one from the JSON options.
+	if !bytes.Contains(clientData, []byte(base64.RawURLEncoding.EncodeToString(challenge))) {
+		t.Error("clientDataJSON does not contain the request challenge")
+	}
 
 	// The challenge must round-trip into clientDataJSON.
 	var cd struct {
