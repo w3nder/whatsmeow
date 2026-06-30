@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "WhatsApp passkey checker",
+  "version": "1.0",
+  "description": "Mostra um botão no web.whatsapp.com para verificar a passkey da conta e onde ela está (Mac ou celular).",
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://web.whatsapp.com/*"]
+    }
+  ]
+}
