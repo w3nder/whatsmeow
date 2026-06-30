@@ -71,6 +71,7 @@ type Client struct {
 
 	isLoggedIn            atomic.Bool
 	paired                atomic.Bool
+	shortcakeLinking      atomic.Pointer[shortcakeLinkingState]
 	expectedDisconnect    *exsync.Event
 	forceAutoReconnect    atomic.Bool
 	EnableAutoReconnect   bool

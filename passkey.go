@@ -8,12 +8,33 @@ package whatsmeow
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"go.mau.fi/util/random"
+	"golang.org/x/crypto/curve25519"
+	"google.golang.org/protobuf/proto"
 
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"go.mau.fi/whatsmeow/util/gcmutil"
+	"go.mau.fi/whatsmeow/util/hkdfutil"
+	"go.mau.fi/whatsmeow/util/keys"
 )
+
+const (
+	shortcakeNonceLength            = 32
+	shortcakeVerificationCodeLength = 5
+	shortcakeEncryptionKeyLength    = 32
+	shortcakeGCMIVLength            = 12
+	shortcakeEncryptionKeyInfo      = "Pairing Information Encryption Key"
+)
+
+const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 // PasskeyAssertion is the result of the WebAuthn ceremony required by the Shortcake passkey prologue.
 type PasskeyAssertion struct {
@@ -21,11 +42,17 @@ type PasskeyAssertion struct {
 	AssertionJSON []byte
 }
 
-// PasskeyAuthenticator supplies the credential-bound parts of the Shortcake passkey prologue.
+// PasskeyAuthenticator supplies the WebAuthn assertion for the Shortcake passkey prologue.
 // Implementations need a passkey registered under rpId "whatsapp.com" whose private key they control.
 type PasskeyAuthenticator interface {
 	GetAssertion(ctx context.Context, requestOptions []byte) (*PasskeyAssertion, error)
-	BuildProloguePayload(ctx context.Context, ref string, deviceType waCompanionReg.DeviceProps_PlatformType) ([]byte, error)
+}
+
+type shortcakeLinkingState struct {
+	keypair        *keys.KeyPair
+	companionNonce []byte
+	ref            string
+	deviceType     waCompanionReg.DeviceProps_PlatformType
 }
 
 func (cli *Client) handlePasskeyPrologueRequest(ctx context.Context, node *waBinary.Node) {
@@ -58,12 +85,148 @@ func (cli *Client) completePasskeyPrologue(ctx context.Context, node *waBinary.N
 		return fmt.Errorf("failed to get shortcake ref: %w", err)
 	}
 
-	prologuePayload, err := cli.PasskeyAuthenticator.BuildProloguePayload(ctx, ref, waCompanionReg.DeviceProps_CHROME)
+	prologuePayload, state, err := buildShortcakeProloguePayload(ref, waCompanionReg.DeviceProps_CHROME)
 	if err != nil {
 		return fmt.Errorf("failed to build prologue payload: %w", err)
 	}
+	cli.shortcakeLinking.Store(state)
 
 	return cli.setPasskeyPrologue(ctx, assertion.CredentialID, assertion.AssertionJSON, prologuePayload, nil)
+}
+
+// buildShortcakeProloguePayload generates the companion ephemeral keypair and nonce, and builds the
+// ProloguePayload (companion ephemeral identity + commitment hash). The commitment is
+// SHA256(companionEphemeralIdentity || companionNonce).
+func buildShortcakeProloguePayload(ref string, deviceType waCompanionReg.DeviceProps_PlatformType) ([]byte, *shortcakeLinkingState, error) {
+	kp := keys.NewKeyPair()
+	nonce := random.Bytes(shortcakeNonceLength)
+
+	ephemeralIdentity, err := proto.Marshal(&waCompanionReg.CompanionEphemeralIdentity{
+		PublicKey:  kp.Pub[:],
+		DeviceType: &deviceType,
+		Ref:        &ref,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	commitment := sha256.Sum256(append(append([]byte{}, ephemeralIdentity...), nonce...))
+
+	payload, err := proto.Marshal(&waCompanionReg.ProloguePayload{
+		CompanionEphemeralIdentity: ephemeralIdentity,
+		Commitment:                 &waCompanionReg.CompanionCommitment{Hash: commitment[:]},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	state := &shortcakeLinkingState{keypair: kp, companionNonce: nonce, ref: ref, deviceType: deviceType}
+	return payload, state, nil
+}
+
+func (cli *Client) handleShortcakeContinuation(ctx context.Context, node *waBinary.Node) {
+	if err := cli.completeShortcakeContinuation(ctx, node); err != nil {
+		cli.Log.Errorf("Failed to handle shortcake continuation: %v", err)
+	}
+}
+
+func (cli *Client) completeShortcakeContinuation(ctx context.Context, node *waBinary.Node) error {
+	state := cli.shortcakeLinking.Load()
+	if state == nil {
+		return fmt.Errorf("received crsc_continuation without prior passkey prologue state")
+	}
+
+	rawIdentity, ok := node.GetChildByTag("primary_ephemeral_identity").Content.([]byte)
+	if !ok {
+		return fmt.Errorf("crsc_continuation missing primary_ephemeral_identity")
+	}
+	var primary waCompanionReg.PrimaryEphemeralIdentity
+	if err := proto.Unmarshal(rawIdentity, &primary); err != nil {
+		return fmt.Errorf("failed to decode PrimaryEphemeralIdentity: %w", err)
+	}
+	if len(primary.GetPublicKey()) != 32 {
+		return fmt.Errorf("PrimaryEphemeralIdentity.publicKey must be 32 bytes")
+	}
+	if len(primary.GetNonce()) != shortcakeNonceLength {
+		return fmt.Errorf("PrimaryEphemeralIdentity.nonce must be %d bytes", shortcakeNonceLength)
+	}
+
+	if err := cli.sendCompanionNonce(ctx, state.companionNonce); err != nil {
+		return fmt.Errorf("failed to send companion nonce: %w", err)
+	}
+
+	code := deriveShortcakeVerificationCode(state.companionNonce, primary.GetPublicKey(), primary.GetNonce())
+	encryptionKey, err := deriveShortcakeEncryptionKey(state.keypair.Priv[:], primary.GetPublicKey(), state.deviceType, state.ref)
+	if err != nil {
+		return fmt.Errorf("failed to derive encryption key: %w", err)
+	}
+
+	cli.dispatchEvent(&events.ShortcakeVerificationCode{Code: code})
+
+	encryptedPairingRequest, err := cli.buildEncryptedPairingRequest(encryptionKey)
+	if err != nil {
+		return fmt.Errorf("failed to build encrypted pairing request: %w", err)
+	}
+	return cli.sendEncryptedPairingRequest(ctx, encryptedPairingRequest)
+}
+
+// deriveShortcakeVerificationCode returns the human-comparable code shown on both devices:
+// Crockford(primaryNonce[:5] XOR SHA256(companionNonce || primaryPublicKey)[:5]).
+func deriveShortcakeVerificationCode(companionNonce, primaryPublicKey, primaryNonce []byte) string {
+	digest := sha256.Sum256(append(append([]byte{}, companionNonce...), primaryPublicKey...))
+	code := make([]byte, shortcakeVerificationCodeLength)
+	for i := 0; i < shortcakeVerificationCodeLength; i++ {
+		code[i] = primaryNonce[i] ^ digest[i]
+	}
+	return crockfordBase32(code)
+}
+
+// deriveShortcakeEncryptionKey runs ECDH and HKDF to derive the pairing information encryption key.
+func deriveShortcakeEncryptionKey(companionPriv, primaryPub []byte, deviceType waCompanionReg.DeviceProps_PlatformType, ref string) ([]byte, error) {
+	sharedSecret, err := curve25519.X25519(companionPriv, primaryPub)
+	if err != nil {
+		return nil, err
+	}
+	salt := "Companion Pairing " + strconv.Itoa(int(deviceType)) + " with ref " + ref
+	return hkdfutil.SHA256(sharedSecret, []byte(salt), []byte(shortcakeEncryptionKeyInfo), shortcakeEncryptionKeyLength), nil
+}
+
+func (cli *Client) buildEncryptedPairingRequest(encryptionKey []byte) ([]byte, error) {
+	pairingRequest, err := proto.Marshal(&waCompanionReg.PairingRequest{
+		CompanionPublicKey:   cli.Store.NoiseKey.Pub[:],
+		CompanionIdentityKey: cli.Store.IdentityKey.Pub[:],
+		AdvSecret:            cli.Store.AdvSecretKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	iv := random.Bytes(shortcakeGCMIVLength)
+	encryptedPayload, err := gcmutil.Encrypt(encryptionKey, iv, pairingRequest, nil)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&waCompanionReg.EncryptedPairingRequest{
+		EncryptedPayload: encryptedPayload,
+		IV:               iv,
+	})
+}
+
+func crockfordBase32(data []byte) string {
+	var sb strings.Builder
+	var buffer uint32
+	var bits int
+	for _, b := range data {
+		buffer = (buffer << 8) | uint32(b)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			sb.WriteByte(crockfordAlphabet[(buffer>>uint(bits))&0x1f])
+		}
+	}
+	if bits > 0 {
+		sb.WriteByte(crockfordAlphabet[(buffer<<uint(5-bits))&0x1f])
+	}
+	return sb.String()
 }
 
 func (cli *Client) getShortcakeRef(ctx context.Context) (string, error) {
@@ -113,10 +276,27 @@ func (cli *Client) setPasskeyPrologue(ctx context.Context, credentialID, webauth
 		Namespace: "md",
 		Type:      iqSet,
 		To:        types.ServerJID,
-		Content: []waBinary.Node{{
-			Tag:     "passkey_prologue",
-			Content: children,
-		}},
+		Content:   []waBinary.Node{{Tag: "passkey_prologue", Content: children}},
+	})
+	return err
+}
+
+func (cli *Client) sendCompanionNonce(ctx context.Context, companionNonce []byte) error {
+	_, err := cli.sendIQ(ctx, infoQuery{
+		Namespace: "md",
+		Type:      iqSet,
+		To:        types.ServerJID,
+		Content:   []waBinary.Node{{Tag: "companion_nonce", Content: companionNonce}},
+	})
+	return err
+}
+
+func (cli *Client) sendEncryptedPairingRequest(ctx context.Context, encryptedPairingRequest []byte) error {
+	_, err := cli.sendIQ(ctx, infoQuery{
+		Namespace: "md",
+		Type:      iqSet,
+		To:        types.ServerJID,
+		Content:   []waBinary.Node{{Tag: "encrypted_pairing_request", Content: encryptedPairingRequest}},
 	})
 	return err
 }

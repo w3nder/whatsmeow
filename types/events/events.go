@@ -40,6 +40,12 @@ type QR struct {
 	Codes []string
 }
 
+// ShortcakeVerificationCode is emitted during companion linking on accounts that require the
+// passkey prologue. The same code is shown on the phone; the operator must confirm they match.
+type ShortcakeVerificationCode struct {
+	Code string
+}
+
 // PairSuccess is emitted after the QR code has been scanned with the phone and the handshake has
 // been completed. Note that this is generally followed by a websocket reconnection, so you should
 // wait for the Connected before trying to send anything.
