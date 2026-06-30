@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "WhatsApp passkey bridge (whatsmeow)",
+  "name": "WhatsApp passkey (whatsmeow)",
   "version": "1.0",
-  "description": "Bridges web.whatsapp.com passkey assertions to a local whatsmeow client.",
+  "description": "Verifica a passkey da conta e assina o vínculo do whatsmeow, tudo no web.whatsapp.com.",
   "host_permissions": [
     "http://127.0.0.1:7799/*",
     "https://web.whatsapp.com/*"
