@@ -174,6 +174,9 @@ type Client struct {
 	GetClientPayload func() *waWa6.ClientPayload
 	QRClientType     PairClientType
 
+	// PasskeyAuthenticator, if set, handles the Shortcake passkey prologue during companion linking.
+	PasskeyAuthenticator PasskeyAuthenticator
+
 	// Should untrusted identity errors be handled automatically? If true, the stored identity and existing signal
 	// sessions will be removed on untrusted identity errors, and an events.IdentityChange will be dispatched.
 	// If false, decrypting a message from untrusted devices will fail.

@@ -504,6 +504,8 @@ func (cli *Client) handleNotification(ctx context.Context, node *waBinary.Node) 
 		cli.handleMexNotification(ctx, node)
 	case "status":
 		cli.handleStatusNotification(ctx, node)
+	case "passkey_prologue_request":
+		go cli.handlePasskeyPrologueRequest(ctx, node)
 	// Other types: business, disappearing_mode, server, status, pay, psa
 	default:
 		cli.Log.Debugf("Unhandled notification with type %s", notifType)
