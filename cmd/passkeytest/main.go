@@ -60,10 +60,9 @@ func main() {
 		}
 	})
 
-	wd, _ := os.Getwd()
 	fmt.Println("\n=== INSTALE A EXTENSÃO (a CSP do WhatsApp bloqueia colar no console) ===")
 	fmt.Println(">>> chrome://extensions > Modo desenvolvedor > Carregar sem compactação (Load unpacked)")
-	fmt.Printf(">>> selecione a pasta: %s/cmd/passkeytest/extension\n", wd)
+	fmt.Println(">>> selecione a pasta cmd/passkeytest/extension (dentro do repositório).")
 	fmt.Println(">>> depois abra/recarregue uma aba LOGADA do web.whatsapp.com.")
 	fmt.Println("=====================================================================")
 
