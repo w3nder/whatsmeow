@@ -46,6 +46,13 @@ type ShortcakeVerificationCode struct {
 	Code string
 }
 
+// ShortcakePasskeyRequired is emitted when the server requires a passkey to link this device but
+// whatsmeow could not satisfy it (no authenticator, or the assertion failed). The user must complete
+// linking in a browser at HelpURL, since the WebAuthn assertion can only run on that origin.
+type ShortcakePasskeyRequired struct {
+	HelpURL string
+}
+
 // PairSuccess is emitted after the QR code has been scanned with the phone and the handshake has
 // been completed. Note that this is generally followed by a websocket reconnection, so you should
 // wait for the Connected before trying to send anything.

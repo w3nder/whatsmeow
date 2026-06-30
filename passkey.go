@@ -122,13 +122,22 @@ func (cli *Client) handlePasskeyPrologueRequest(ctx context.Context, node *waBin
 	}
 
 	if cli.PasskeyAuthenticator == nil {
-		cli.Log.Warnf("Received passkey_prologue_request but no PasskeyAuthenticator is set; linking will time out")
+		cli.Log.Warnf("This account requires a passkey to link, but no PasskeyAuthenticator is set. " +
+			"whatsmeow cannot create a passkey (the WhatsApp protocol has no enrollment); the assertion " +
+			"can only run on the whatsapp.com origin. Open " + PasskeyHelpURL + " in a browser and link " +
+			"there, or run with the passkey bridge. See tulir/whatsmeow#1185.")
+		cli.dispatchEvent(&events.ShortcakePasskeyRequired{HelpURL: PasskeyHelpURL})
 		return
 	}
 	if err := cli.completePasskeyPrologue(ctx, node); err != nil {
 		cli.Log.Errorf("Failed to complete passkey prologue: %v", err)
+		cli.dispatchEvent(&events.ShortcakePasskeyRequired{HelpURL: PasskeyHelpURL})
 	}
 }
+
+// PasskeyHelpURL is shown to the user when an account requires a passkey that whatsmeow cannot
+// satisfy headlessly. The assertion can only run on this origin.
+const PasskeyHelpURL = "https://web.whatsapp.com"
 
 func (cli *Client) completePasskeyPrologue(ctx context.Context, node *waBinary.Node) error {
 	options, _ := node.GetChildByTag("passkey_request_options").Content.([]byte)
