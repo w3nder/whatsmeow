@@ -1,14 +1,15 @@
-// Command passkeytest links a device with whatsmeow, wiring the browser passkey bridge so accounts
-// that require the Shortcake passkey prologue can complete linking.
+// Command passkeytest links a device with whatsmeow, wiring a passkey authenticator so accounts that
+// require the Shortcake passkey prologue can complete linking.
 //
 // Usage:
-//  1. go run ./cmd/passkeytest
-//  2. Paste the printed script into the console of a logged-in https://web.whatsapp.com tab.
-//  3. Scan the QR code shown in the terminal.
+//
+//	go run ./cmd/passkeytest               # default: headless virtual authenticator (no browser)
+//	go run ./cmd/passkeytest -mode bridge  # reuse an existing browser passkey (needs the extension)
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -24,9 +25,15 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-const bridgeAddr = "127.0.0.1:7799"
+const (
+	bridgeAddr   = "127.0.0.1:7799"
+	virtualStore = "passkey_virtual.json"
+)
 
 func main() {
+	mode := flag.String("mode", "virtual", "passkey authenticator: virtual (headless) or bridge (browser)")
+	flag.Parse()
+
 	ctx := context.Background()
 
 	dbLog := waLog.Stdout("Database", "INFO", true)
@@ -42,14 +49,12 @@ func main() {
 	clientLog := waLog.Stdout("Client", "INFO", true)
 	cli := whatsmeow.NewClient(deviceStore, clientLog)
 
-	// Browser passkey bridge: an existing browser/OS passkey signs the prologue assertion.
-	bridge := passkeyauth.NewBrowserPasskeyAuthenticator()
-	go func() {
-		if serveErr := bridge.ListenAndServe(bridgeAddr); serveErr != nil {
-			clientLog.Errorf("Bridge server stopped: %v", serveErr)
-		}
-	}()
-	cli.PasskeyAuthenticator = bridge
+	switch *mode {
+	case "bridge":
+		setupBridge(cli, clientLog)
+	default:
+		setupVirtual(cli, clientLog)
+	}
 
 	cli.AddEventHandler(func(evt any) {
 		switch e := evt.(type) {
@@ -59,12 +64,6 @@ func main() {
 			fmt.Printf("\n>>> Pareado com sucesso: %s\n\n", e.ID)
 		}
 	})
-
-	fmt.Println("\n=== INSTALE A EXTENSÃO (a CSP do WhatsApp bloqueia colar no console) ===")
-	fmt.Println(">>> chrome://extensions > Modo desenvolvedor > Carregar sem compactação (Load unpacked)")
-	fmt.Println(">>> selecione a pasta cmd/passkeytest/extension (dentro do repositório).")
-	fmt.Println(">>> depois abra/recarregue uma aba LOGADA do web.whatsapp.com.")
-	fmt.Println("=====================================================================")
 
 	if cli.Store.ID == nil {
 		qrChan, _ := cli.GetQRChannel(ctx)
@@ -93,4 +92,47 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	cli.Disconnect()
+}
+
+// setupVirtual wires the headless software passkey. No browser is involved. The credential is
+// persisted so the same passkey is reused across runs.
+func setupVirtual(cli *whatsmeow.Client, log waLog.Logger) {
+	var va *passkeyauth.VirtualAuthenticator
+	if blob, err := os.ReadFile(virtualStore); err == nil {
+		if va, err = passkeyauth.ImportVirtualAuthenticator(blob); err != nil {
+			log.Warnf("Failed to load %s, generating a new one: %v", virtualStore, err)
+			va = nil
+		}
+	}
+	if va == nil {
+		var err error
+		if va, err = passkeyauth.NewVirtualAuthenticator(); err != nil {
+			panic(err)
+		}
+		if blob, err := va.Export(); err == nil {
+			_ = os.WriteFile(virtualStore, blob, 0o600)
+		}
+	}
+	cli.PasskeyAuthenticator = va
+	fmt.Println("\n=== Modo VIRTUAL (headless, sem browser) ===")
+	fmt.Println(">>> A passkey é de software; nenhum browser/extensão é usado.")
+	fmt.Println(">>> Obs.: o registro automático (RegisterPasskey) ainda é um stub — em contas que")
+	fmt.Println(">>>       exigem passkey, o assertion vai falhar até o enrollment ser implementado.")
+	fmt.Println("============================================")
+}
+
+// setupBridge wires the browser-backed authenticator and prints the extension instructions.
+func setupBridge(cli *whatsmeow.Client, log waLog.Logger) {
+	bridge := passkeyauth.NewBrowserPasskeyAuthenticator()
+	go func() {
+		if err := bridge.ListenAndServe(bridgeAddr); err != nil {
+			log.Errorf("Bridge server stopped: %v", err)
+		}
+	}()
+	cli.PasskeyAuthenticator = bridge
+	fmt.Println("\n=== Modo BRIDGE (usa o browser) — INSTALE A EXTENSÃO ===")
+	fmt.Println(">>> chrome://extensions > Modo desenvolvedor > Carregar sem compactação (Load unpacked)")
+	fmt.Println(">>> selecione a pasta cmd/passkeytest/extension (dentro do repositório).")
+	fmt.Println(">>> depois abra/recarregue uma aba LOGADA do web.whatsapp.com.")
+	fmt.Println("=======================================================")
 }
