@@ -4,7 +4,7 @@
 // Usage:
 //
 //	go run ./cmd/passkeytest               # default: headless virtual authenticator (no browser)
-//	go run ./cmd/passkeytest -mode bridge  # reuse an existing browser passkey (needs the extension)
+//	go run ./cmd/passkeytest -mode bridge  # reuse an existing browser passkey (extension: w3nder/wa-passkey)
 package main
 
 import (
@@ -135,8 +135,8 @@ func setupBridge(cli *whatsmeow.Client, log waLog.Logger) {
 	}()
 	cli.PasskeyAuthenticator = bridge
 	fmt.Println("\n=== Modo BRIDGE (usa o browser) — INSTALE A EXTENSÃO ===")
+	fmt.Println(">>> A extensão está no repo: https://github.com/w3nder/wa-passkey (pasta extension/)")
 	fmt.Println(">>> chrome://extensions > Modo desenvolvedor > Carregar sem compactação (Load unpacked)")
-	fmt.Println(">>> selecione a pasta cmd/passkeytest/extension (dentro do repositório).")
-	fmt.Println(">>> depois abra/recarregue uma aba LOGADA do web.whatsapp.com.")
+	fmt.Println(">>> selecione a pasta extension/ do wa-passkey, abra uma aba LOGADA do web.whatsapp.com.")
 	fmt.Println("=======================================================")
 }
